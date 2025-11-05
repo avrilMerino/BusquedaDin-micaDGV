@@ -8,53 +8,62 @@ namespace BusquedaDinámicaDGV
 {
     public partial class Form1 : Form
     {
-        // Usa SIEMPRE la cadena del app.config (name="InstitutoDB")
+// PASO 0 (Infraestructura): Cadena de conexión desde app.config
+        //  Debe existir <connectionStrings><add name="InstitutoDB" .../>
+
         private readonly string connectionString =
             ConfigurationManager.ConnectionStrings["InstitutoDB"].ConnectionString;
 
-        // DataTable de la clase (para RowFilter)
-        private readonly DataTable dt = new DataTable();
+// PASO 1 (Modelo en memoria): DataTable que contendrá TODA la tabla "Alumno"
+        // - Mantenerlo como CAMPO de clase es CLAVE para poder filtrar con RowFilter
 
+        private readonly DataTable dt = new DataTable();
         public Form1()
         {
             InitializeComponent();
 
-            // 🔴 IMPORTANTE: asegura que se ejecuta Form1_Load
+// PASO 2 (Eventos): Aseguramos que se ejecuta el pipeline de carga y filtro
+            // - Form1_Load: hará la carga de datos y el primer enlace
+            // - TextChanged del cuadro de búsqueda: disparará el filtrado en caliente
             this.Load += Form1_Load;
-
-            // Si quieres filtro dinámico, engancha el TextChanged (el diseñador no lo tenía)
             this.busqueda.TextChanged += tbBusqueda_TextChanged;
         }
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            // Para evitar columnas “de diseñador”
+// PASO 3 (Preparar el DataGridView):
+            // - Evitamos que las columnas puestas en el diseñador bloqueen el autogenerado.
+            // - "AutoGenerateColumns = true" hará que el DGV cree columnas a partir de dt.
             dgv.AutoGenerateColumns = true;
             dgv.Columns.Clear();
 
-            // 1) Solo probar conexión (sin tocar el grid)
+// PASO 4 (Comprobar conexión rápidamente:
             ProbarConexion();
 
-            // 2) Cargar datos en dt
+// PASO 5 (Cargar datos UNA VEZ):
             traerDatos();
 
-            // 3) Enlazar grid
+// PASO 6 (DataBinding inicial):
+           
             dgv.DataSource = dt;
 
-            // 4) Rellenar combo
+// PASO 7 (Rellenar ComboBox de columnas):
+            // - Rellenamos con NOMBRES reales de columnas, salidos del DataTable,
+            //   para que el usuario elija sobre qué campo quiere filtra
             rellenarComboBox();
         }
 
         private void ProbarConexion()
         {
-            const string sql = "SELECT TOP (1) 1 FROM dbo.Alumno"; // test simple
+            // Consulta mínima para comprobar conectividad (no arrastra datos)
+            const string sql = "SELECT TOP (1) 1 FROM dbo.Alumno";
             try
             {
                 using (var cnx = new SqlConnection(connectionString))
                 using (var cmd = new SqlCommand(sql, cnx))
                 {
                     cnx.Open();
-                    cmd.ExecuteScalar(); // si no lanza, OK
+                    cmd.ExecuteScalar(); // si no lanza excepción, la conexión es OK
                 }
             }
             catch (Exception ex)
@@ -63,43 +72,53 @@ namespace BusquedaDinámicaDGV
             }
         }
 
+        // PASO 8 (Filtrado dinámico):
+        // - Se ejecuta cada vez que cambia el texto de búsqueda.
+        // - Usamos DataView.RowFilter sobre dt.DefaultView (NO volvemos a consultar BD).
+        // - Si la columna no es string (números/fechas), la Convertimos a string para usar LIKE.
+        // - Buscamos en cualquier parte del valor con '%texto%'. Cambia a '{texto}%' si quieres "empieza por".
         public void consultarConRowFilter()
         {
-            var col = cbCampos.Text;                           // columna elegida
-            var texto = busqueda.Text?.Replace("'", "''") ?? string.Empty; // escapa comillas
+            string col = cbCampos.Text;                               // columna elegida
+            string texto = busqueda.Text?.Replace("'", "''") ?? "";   // escapar comillas simples
 
+            // Si el cuadro está vacío => quitamos filtro
             if (string.IsNullOrWhiteSpace(texto))
             {
                 dt.DefaultView.RowFilter = string.Empty;
-                dgv.DataSource = dt.DefaultView;
+                dgv.DataSource = dt.DefaultView;   // (opcional, ya estaba enlazado)
                 return;
             }
 
-            // Si la columna es string: LIKE directo. Si no, convierto a string.
             bool esString = dt.Columns[col].DataType == typeof(string);
+
+            // Filtro expresado en sintaxis de DataColumn (NO SQL). Ojo con corchetes en el nombre.
             string filtro = esString
                 ? $"[{col}] LIKE '%{texto}%'"                                 // texto
                 : $"Convert([{col}], 'System.String') LIKE '%{texto}%'";      // números/fechas
 
             try
             {
-                dt.DefaultView.RowFilter = filtro;
-                dgv.DataSource = dt.DefaultView;
+                dt.DefaultView.RowFilter = filtro; // aplica filtro sobre la vista
+                dgv.DataSource = dt.DefaultView;   // el DGV muestra la vista filtrada
             }
             catch
             {
-                // fallback por si el nombre de columna tuviera caracteres raros
+                // Si hubiera un nombre raro/espacios sin corchetes, volvemos a sin filtro
                 dt.DefaultView.RowFilter = string.Empty;
                 dgv.DataSource = dt.DefaultView;
             }
         }
 
-
+        // Evento del TextBox: cada pulsación actualiza el filtro
         private void tbBusqueda_TextChanged(object sender, EventArgs e)
         {
             consultarConRowFilter();
         }
 
+// PASO 9 (Combo de columnas):
+        // - Se llena a partir de dt.Columns para usar nombres REALES de la tabla.
+        // - Selecciona la primera columna por defecto.
         private void rellenarComboBox()
         {
             cbCampos.Items.Clear();
@@ -110,9 +129,13 @@ namespace BusquedaDinámicaDGV
                 cbCampos.SelectedIndex = 0;
         }
 
+// PASO 5 (Implementación): Cargar los datos en memoria
+        // - Ejecuta SELECT y hace dt.Load(dr).
+        // - dt.Clear() por si recargas (evita duplicados).
         private void traerDatos()
         {
-            const string sql = "SELECT AlumnoId, NIF, Nombre, Apellido1, Apellido2, FechaNac, GrupoId FROM dbo.Alumno";
+            const string sql =
+                "SELECT AlumnoId, NIF, Nombre, Apellido1, Apellido2, FechaNac, GrupoId FROM dbo.Alumno";
 
             try
             {
@@ -120,9 +143,10 @@ namespace BusquedaDinámicaDGV
                 using (var cmd = new SqlCommand(sql, cnx))
                 {
                     cnx.Open();
-                    dt.Clear();
+
+                    dt.Clear();                   // limpia contenido previo
                     using (var dr = cmd.ExecuteReader())
-                        dt.Load(dr);
+                        dt.Load(dr);             // vuelca todo el DataReader al DataTable
                 }
             }
             catch (Exception ex)
@@ -130,8 +154,6 @@ namespace BusquedaDinámicaDGV
                 MessageBox.Show("Error al traer datos: " + ex.Message);
             }
         }
-
-        // Tus handlers vacíos pueden quedarse
         private void busqueda_Click(object sender, EventArgs e) { }
         private void dgv_CellContentClick(object sender, DataGridViewCellEventArgs e) { }
         private void comboBox1_SelectedIndexChanged(object sender, EventArgs e) { }
