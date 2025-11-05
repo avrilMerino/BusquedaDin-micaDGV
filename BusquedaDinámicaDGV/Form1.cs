@@ -8,40 +8,124 @@ namespace BusquedaDinámicaDGV
 {
     public partial class Form1 : Form
     {
+        // Usa SIEMPRE la cadena del app.config (name="InstitutoDB")
+        private readonly string connectionString =
+            ConfigurationManager.ConnectionStrings["InstitutoDB"].ConnectionString;
+
+        // DataTable de la clase (para RowFilter)
+        private readonly DataTable dt = new DataTable();
+
         public Form1()
         {
             InitializeComponent();
+
+            // 🔴 IMPORTANTE: asegura que se ejecuta Form1_Load
+            this.Load += Form1_Load;
+
+            // Si quieres filtro dinámico, engancha el TextChanged (el diseñador no lo tenía)
+            this.busqueda.TextChanged += tbBusqueda_TextChanged;
         }
 
         private void Form1_Load(object sender, EventArgs e)
         {
+            // Para evitar columnas “de diseñador”
+            dgv.AutoGenerateColumns = true;
+            dgv.Columns.Clear();
+
+            // 1) Solo probar conexión (sin tocar el grid)
             ProbarConexion();
+
+            // 2) Cargar datos en dt
+            traerDatos();
+
+            // 3) Enlazar grid
+            dgv.DataSource = dt;
+
+            // 4) Rellenar combo
+            rellenarComboBox();
         }
 
         private void ProbarConexion()
         {
-            string sql = "SELECT * FROM Cliente";
-            SqlConnection cnx = new SqlConnection();
+            const string sql = "SELECT TOP (1) 1 FROM dbo.Alumno"; // test simple
             try
             {
-                cnx.Open();
-                SqlCommand command = new SqlCommand(sql, cnx);
-                SqlDataReader dataReader = command.ExecuteReader();
-                DataTable dt = new DataTable();
-                dt.Load(dataReader);
-                dgv.DataSource = dt;
-                command.Dispose();
-                cnx.Close();
+                using (var cnx = new SqlConnection(connectionString))
+                using (var cmd = new SqlCommand(sql, cnx))
+                {
+                    cnx.Open();
+                    cmd.ExecuteScalar(); // si no lanza, OK
+                }
             }
-            catch (SqlException e)
+            catch (Exception ex)
             {
-                MessageBox.Show("No se puede realizar la conexion");
+                MessageBox.Show("No se puede realizar la conexión: " + ex.Message);
             }
         }
 
-        private void label1_Click(object sender, EventArgs e)
+        public void consultarConRowFilter()
         {
-            // evento vacío (opcional)
+            // Filtramos sobre el dt que ya está en memoria
+            var campo = cbCampos.Text;
+            var texto = busqueda.Text?.Replace("'", "''") ?? string.Empty;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(texto))
+                    dt.DefaultView.RowFilter = string.Empty;
+                else
+                    dt.DefaultView.RowFilter = $"{campo} LIKE '{texto}%'";
+
+                // Enlaza la vista filtrada (no hace falta reconsultar la BD)
+                dgv.DataSource = dt.DefaultView;
+            }
+            catch (EvaluateException)
+            {
+                dt.DefaultView.RowFilter = string.Empty;
+                dgv.DataSource = dt.DefaultView;
+            }
         }
+
+        private void tbBusqueda_TextChanged(object sender, EventArgs e)
+        {
+            consultarConRowFilter();
+        }
+
+        private void rellenarComboBox()
+        {
+            cbCampos.Items.Clear();
+            foreach (DataColumn col in dt.Columns)
+                cbCampos.Items.Add(col.ColumnName);
+
+            if (cbCampos.Items.Count > 0)
+                cbCampos.SelectedIndex = 0;
+        }
+
+        private void traerDatos()
+        {
+            const string sql = "SELECT AlumnoId, NIF, Nombre, Apellido1, Apellido2, FechaNac, GrupoId FROM dbo.Alumno";
+
+            try
+            {
+                using (var cnx = new SqlConnection(connectionString))
+                using (var cmd = new SqlCommand(sql, cnx))
+                {
+                    cnx.Open();
+                    dt.Clear();
+                    using (var dr = cmd.ExecuteReader())
+                        dt.Load(dr);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error al traer datos: " + ex.Message);
+            }
+        }
+
+        // Tus handlers vacíos pueden quedarse
+        private void busqueda_Click(object sender, EventArgs e) { }
+        private void dgv_CellContentClick(object sender, DataGridViewCellEventArgs e) { }
+        private void comboBox1_SelectedIndexChanged(object sender, EventArgs e) { }
+        private void busqueda_MaskInputRejected(object sender, MaskInputRejectedEventArgs e) { }
     }
 }
