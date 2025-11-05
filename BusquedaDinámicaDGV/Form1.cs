@@ -65,26 +65,35 @@ namespace BusquedaDinámicaDGV
 
         public void consultarConRowFilter()
         {
-            // Filtramos sobre el dt que ya está en memoria
-            var campo = cbCampos.Text;
-            var texto = busqueda.Text?.Replace("'", "''") ?? string.Empty;
+            var col = cbCampos.Text;                           // columna elegida
+            var texto = busqueda.Text?.Replace("'", "''") ?? string.Empty; // escapa comillas
+
+            if (string.IsNullOrWhiteSpace(texto))
+            {
+                dt.DefaultView.RowFilter = string.Empty;
+                dgv.DataSource = dt.DefaultView;
+                return;
+            }
+
+            // Si la columna es string: LIKE directo. Si no, convierto a string.
+            bool esString = dt.Columns[col].DataType == typeof(string);
+            string filtro = esString
+                ? $"[{col}] LIKE '%{texto}%'"                                 // texto
+                : $"Convert([{col}], 'System.String') LIKE '%{texto}%'";      // números/fechas
 
             try
             {
-                if (string.IsNullOrWhiteSpace(texto))
-                    dt.DefaultView.RowFilter = string.Empty;
-                else
-                    dt.DefaultView.RowFilter = $"{campo} LIKE '{texto}%'";
-
-                // Enlaza la vista filtrada (no hace falta reconsultar la BD)
+                dt.DefaultView.RowFilter = filtro;
                 dgv.DataSource = dt.DefaultView;
             }
-            catch (EvaluateException)
+            catch
             {
+                // fallback por si el nombre de columna tuviera caracteres raros
                 dt.DefaultView.RowFilter = string.Empty;
                 dgv.DataSource = dt.DefaultView;
             }
         }
+
 
         private void tbBusqueda_TextChanged(object sender, EventArgs e)
         {
